@@ -5,6 +5,7 @@ export default function transformer(file: FileInfo, api: API) {
   const root = j(file.source);
 
   const removeFireEventImport = () => {
+    // Step 1: Find all imports of 'fireEvent' from '@testing-library/react'
     root
       .find(j.ImportDeclaration, {
         source: { value: '@testing-library/react' },
@@ -14,20 +15,32 @@ export default function transformer(file: FileInfo, api: API) {
 
         const specifiers = path.value.specifiers as ImportSpecifier[];
 
-        const fireEventSpecifierIndex = specifiers.findIndex(
+        // Step 2: Find the 'fireEvent' specifier
+        const fireEventSpecifier = specifiers.find(
           (specifier) => specifier.imported && specifier.imported.name === 'fireEvent',
         );
 
-        if (fireEventSpecifierIndex !== -1) {
-          // Remove the specific 'fireEvent' specifier
-          specifiers.splice(fireEventSpecifierIndex, 1);
+        if (fireEventSpecifier) {
+          // Step 3: Check if 'fireEvent' is used in the file
+          const fireEventIsUsed = root
+            .find(j.Identifier, { name: 'fireEvent' })
+            .some((identifierPath) => {
+              const parentNode = identifierPath.parentPath.value;
+              // Ensure 'fireEvent' is not part of the import declaration itself
+              return parentNode.type !== 'ImportSpecifier';
+            });
 
-          // If no specifiers remain, remove the entire ImportDeclaration
-          if (specifiers.length === 0) {
-            j(path).remove();
+          if (!fireEventIsUsed) {
+            // Remove the 'fireEvent' specifier
+            specifiers.splice(specifiers.indexOf(fireEventSpecifier), 1);
+
+            // If no specifiers remain, remove the entire ImportDeclaration
+            if (specifiers.length === 0) {
+              j(path).remove();
+            }
+
+            console.log(`[DEBUG] Removed unused 'fireEvent' import from: ${file.path}`);
           }
-
-          console.log(`[DEBUG] Removed 'fireEvent' import from: ${file.path}`);
         }
       });
   };
@@ -79,7 +92,7 @@ export default function transformer(file: FileInfo, api: API) {
         }
 
         // Handle fireEvent.change(<ele>, { target: { value: <value> } })
-        if (method === 'change' && args.length === 2) {
+        if ((method === 'change' || method === 'input') && args.length === 2) {
           const [element, secondArg] = args;
 
           // Ensure the second argument is an object expression with target -> value
@@ -124,7 +137,7 @@ export default function transformer(file: FileInfo, api: API) {
         `[DEBUG] Replaced 'fireEvent.click' with 'await user.click' in file: ${file.path}`,
       );
       console.log(
-        `[DEBUG] Replaced 'fireEvent.change' with 'await user.type' in file: ${file.path}`,
+        `[DEBUG] Replaced 'fireEvent.change' and 'fireEvent.input' with 'await user.type' in file: ${file.path}`,
       );
     }
     return hasReplacement;
@@ -235,7 +248,7 @@ export default function transformer(file: FileInfo, api: API) {
         addAsyncToCallback(callback);
       });
 
-    // removeFireEventImport();
+    removeFireEventImport();
 
     return root.toSource({ quote: 'single', trailingComma: true });
   } catch (error) {

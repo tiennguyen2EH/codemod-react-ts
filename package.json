@@ -6,7 +6,9 @@
   "scripts": {
     "test": "jest",
     "build": "tsc",
-    "codemod": "jscodeshift"
+    "codemod": "jscodeshift",
+    "migrate": "node migrate.js",
+    "statistic": "node jest_statistic_run_times.js"
   },
   "author": "",
   "license": "MIT",
