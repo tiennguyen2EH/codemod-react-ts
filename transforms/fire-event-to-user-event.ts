@@ -66,7 +66,7 @@ export default function transformer(file: FileInfo, api: API) {
         const args = fireEventPath.value.arguments;
 
         // Handle fireEvent.click(<ele>)
-        if (method === 'click' && args.length === 1) {
+        if ((method === 'click' || method === 'focus') && args.length === 1) {
           j(fireEventPath).replaceWith(
             j.awaitExpression(
               j.callExpression(
