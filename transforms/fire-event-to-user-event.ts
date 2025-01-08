@@ -91,6 +91,19 @@ export default function transformer(file: FileInfo, api: API) {
           hasReplacement = true;
         }
 
+        // Handle fireEvent.blur(<ele>)
+        if (method === 'blur' && args.length === 1) {
+          j(fireEventPath).replaceWith(
+            j.awaitExpression(
+              j.callExpression(
+                j.memberExpression(j.identifier('user'), j.identifier('blur')),
+                args,
+              ),
+            ),
+          );
+          hasReplacement = true;
+        }
+
         // Handle fireEvent.change(<ele>, { target: { value: <value> } })
         if ((method === 'change' || method === 'input') && args.length === 2) {
           const [element, secondArg] = args;
