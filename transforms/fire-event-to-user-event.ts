@@ -164,7 +164,13 @@ export default function transformer(file: FileInfo, api: API) {
   };
 
   const getUserFromSetup = (blockBody: BlockStatement['body']) => {
-    const setupMethods = ['setUp', 'setup'];
+    const setupMethods = [
+      'setUp',
+      'setup',
+      'renderWithReduxForm',
+      'renderWithRedux',
+      'renderWithTheme',
+    ];
 
     j(blockBody)
       .find(j.CallExpression, {
