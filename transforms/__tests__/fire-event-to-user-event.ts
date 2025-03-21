@@ -2,8 +2,8 @@ jest.autoMockOff();
 
 import { defineTest } from 'jscodeshift/dist/testUtils';
 
-const name = 'button-kind-to-variant';
-const fixtures = ['basic'] as const;
+const name = 'fire-event-to-user-event';
+const fixtures = ['spec'] as const;
 
 describe(name, () => {
   fixtures.forEach((test) =>

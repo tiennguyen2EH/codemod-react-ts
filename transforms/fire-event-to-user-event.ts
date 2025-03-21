@@ -1,4 +1,95 @@
-import type { API, BlockStatement, FileInfo, Identifier, ImportSpecifier } from 'jscodeshift';
+/**
+ * Core Requirements
+ *
+ * Import Management:
+ * - Removes unused fireEvent imports from @testing-library/react
+ * - Automatically cleans up import statements when fireEvent is no longer used
+ * - Preserves other imports from @testing-library/react
+ *
+ * Event Migration:
+ * - Converts fireEvent methods to userEvent methods based on FIRE_EVENT_TO_USER_EVENT_MAP
+ * - Handles special cases for change/input events with target.value
+ * - Makes test callbacks async when needed
+ *
+ * Setup Function Handling:
+ * - Supports multiple setup function names (SUPPORTED_RENDER_METHODS)
+ * - Automatically adds user to destructured setup results
+ * - Preserves existing destructuring patterns
+ *
+ * Test Block Processing:
+ * - Processes both global it and it.each test blocks
+ * - Makes test callbacks async when needed
+ * - Preserves existing test structure and assertions
+ * - Maintains test block context and scope
+ *
+ * Error Handling:
+ * - Gracefully handles null/undefined AST nodes
+ * - Validates AST node types before transformations
+ * - Returns original source on transformation failure
+ * - Provides debug logging for transformation steps
+ */
+
+import type {
+  API,
+  BlockStatement,
+  FileInfo,
+  Identifier,
+  ImportSpecifier,
+  CallExpression,
+  ASTPath,
+} from 'jscodeshift';
+
+// Configuration
+const SUPPORTED_RENDER_METHODS = [
+  'setUp',
+  'setup',
+  'renderWithReduxForm',
+  'renderWithRedux',
+  'renderWithTheme',
+] as const;
+
+const FIRE_EVENT_TO_USER_EVENT_MAP = {
+  click: 'click',
+  focus: 'click',
+  mouseOver: 'hover',
+  mouseOut: 'unhover',
+  blur: 'blur',
+  change: 'type',
+  input: 'type',
+} as const;
+
+type FireEventMethod = keyof typeof FIRE_EVENT_TO_USER_EVENT_MAP;
+type UserEventMethod = (typeof FIRE_EVENT_TO_USER_EVENT_MAP)[FireEventMethod];
+
+// Utility functions
+const createUserEventCall = (j: any, method: UserEventMethod, args: any[]) => {
+  return j.awaitExpression(
+    j.callExpression(j.memberExpression(j.identifier('user'), j.identifier(method)), args),
+  );
+};
+
+const isTargetValueObject = (obj: any): boolean => {
+  return (
+    obj.type === 'ObjectExpression' &&
+    obj.properties.some(
+      (prop: any) =>
+        prop.key.type === 'Identifier' &&
+        prop.key.name === 'target' &&
+        prop.value.type === 'ObjectExpression' &&
+        prop.value.properties.some(
+          (innerProp) => innerProp.key.type === 'Identifier' && innerProp.key.name === 'value',
+        ),
+    )
+  );
+};
+
+const extractValueFromTarget = (obj: any): any => {
+  const targetProperty = obj.properties.find((prop: any) => prop.key.name === 'target');
+  const valueProperty = targetProperty.value.properties.find(
+    (innerProp) => innerProp.key.name === 'value',
+  );
+  return valueProperty.value;
+};
 
 export default function transformer(file: FileInfo, api: API) {
   const j = api.jscodeshift;
@@ -50,7 +141,7 @@ export default function transformer(file: FileInfo, api: API) {
     j(blockBody)
       .find(j.CallExpression, { callee: { object: { name: 'fireEvent' } } })
       .forEach((fireEventPath) => {
-        if (!fireEventPath || !fireEventPath.value) return; // Guard against null/undefined fireEventPath
+        if (!fireEventPath || !fireEventPath.value) return;
 
         if (fireEventPath.value.callee.type !== 'MemberExpression') {
           return;
@@ -62,96 +153,32 @@ export default function transformer(file: FileInfo, api: API) {
           return;
         }
 
-        const method = callee.property.name; // Get the method name (click, change, etc.)
+        const method = callee.property.name as FireEventMethod;
         const args = fireEventPath.value.arguments;
 
-        // Handle fireEvent.click(<ele>)
-        if ((method === 'click' || method === 'focus') && args.length === 1) {
-          j(fireEventPath).replaceWith(
-            j.awaitExpression(
-              j.callExpression(
-                j.memberExpression(j.identifier('user'), j.identifier('click')),
-                args,
-              ),
-            ),
-          );
-          hasReplacement = true;
-        }
+        // Check if the method is supported in our mapping
+        const userEventMethod = FIRE_EVENT_TO_USER_EVENT_MAP[method];
+        if (!userEventMethod) return;
 
-        // Handle fireEvent.mouseOver(<ele>)
-        if (method === 'mouseOver' && args.length === 1) {
-          j(fireEventPath).replaceWith(
-            j.awaitExpression(
-              j.callExpression(
-                j.memberExpression(j.identifier('user'), j.identifier('hover')),
-                args,
-              ),
-            ),
-          );
-          hasReplacement = true;
-        }
-
-        // Handle fireEvent.blur(<ele>)
-        if (method === 'blur' && args.length === 1) {
-          j(fireEventPath).replaceWith(
-            j.awaitExpression(
-              j.callExpression(
-                j.memberExpression(j.identifier('user'), j.identifier('blur')),
-                args,
-              ),
-            ),
-          );
-          hasReplacement = true;
-        }
-
-        // Handle fireEvent.change(<ele>, { target: { value: <value> } })
+        // Handle special cases for change/input events
         if ((method === 'change' || method === 'input') && args.length === 2) {
           const [element, secondArg] = args;
 
           // Ensure the second argument is an object expression with target -> value
-          if (
-            secondArg.type === 'ObjectExpression' &&
-            secondArg.properties.some(
-              (prop: any) =>
-                prop.key.type === 'Identifier' &&
-                prop.key.name === 'target' &&
-                prop.value.type === 'ObjectExpression' &&
-                prop.value.properties.some(
-                  (innerProp) =>
-                    innerProp.key.type === 'Identifier' && innerProp.key.name === 'value',
-                ),
-            )
-          ) {
-            // Extract the value from target.value
-            const targetProperty: any = secondArg.properties.find(
-              (prop: any) => prop.key.name === 'target',
-            );
-
-            const valueProperty = targetProperty.value.properties.find(
-              (innerProp) => innerProp.key.name === 'value',
-            );
-
-            const value = valueProperty.value; // Extract the value node
-
-            j(fireEventPath).replaceWith(
-              j.awaitExpression(
-                j.callExpression(
-                  j.memberExpression(j.identifier('user'), j.identifier('type')),
-                  [element, value], // Use the extracted <ele> and <value>
-                ),
-              ),
-            );
+          if (isTargetValueObject(secondArg)) {
+            const value = extractValueFromTarget(secondArg);
+            j(fireEventPath).replaceWith(createUserEventCall(j, userEventMethod, [element, value]));
             hasReplacement = true;
           }
+        } else if (args.length === 1) {
+          // Handle simple events (click, hover, blur, etc.)
+          j(fireEventPath).replaceWith(createUserEventCall(j, userEventMethod, args));
+          hasReplacement = true;
         }
       });
+
     if (hasReplacement) {
-      console.log(
-        `[DEBUG] Replaced 'fireEvent.click' with 'await user.click' in file: ${file.path}`,
-      );
-      console.log(
-        `[DEBUG] Replaced 'fireEvent.change' and 'fireEvent.input' with 'await user.type' in file: ${file.path}`,
-      );
+      console.log(`[DEBUG] Replaced fireEvent calls with userEvent in file: ${file.path}`);
     }
     return hasReplacement;
   };
@@ -164,17 +191,9 @@ export default function transformer(file: FileInfo, api: API) {
   };
 
   const getUserFromSetup = (blockBody: BlockStatement['body']) => {
-    const setupMethods = [
-      'setUp',
-      'setup',
-      'renderWithReduxForm',
-      'renderWithRedux',
-      'renderWithTheme',
-    ];
-
     j(blockBody)
       .find(j.CallExpression, {
-        callee: { type: 'Identifier', name: (name) => setupMethods.includes(name) },
+        callee: { type: 'Identifier', name: (name) => SUPPORTED_RENDER_METHODS.includes(name) },
       })
       .forEach((setupPath) => {
         const parentPath = setupPath.parentPath;
@@ -190,13 +209,23 @@ export default function transformer(file: FileInfo, api: API) {
             if (!userExists) {
               // Add 'user' to the existing destructuring
               declarator.id.properties.push(
-                j.property('init', j.identifier('user'), j.identifier('user')),
+                j.property.from({
+                  kind: 'init',
+                  key: j.identifier('user'),
+                  value: j.identifier('user'),
+                  shorthand: true,
+                }),
               );
             }
           } else {
             // Replace simple variable assignment with destructuring
             declarator.id = j.objectPattern([
-              j.property('init', j.identifier('user'), j.identifier('user')),
+              j.property.from({
+                kind: 'init',
+                key: j.identifier('user'),
+                value: j.identifier('user'),
+                shorthand: true,
+              }),
             ]);
           }
         } else {
@@ -204,7 +233,14 @@ export default function transformer(file: FileInfo, api: API) {
           j(setupPath).replaceWith(
             j.variableDeclaration('const', [
               j.variableDeclarator(
-                j.objectPattern([j.property('init', j.identifier('user'), j.identifier('user'))]),
+                j.objectPattern([
+                  j.property.from({
+                    kind: 'init',
+                    key: j.identifier('user'),
+                    value: j.identifier('user'),
+                    shorthand: true,
+                  }),
+                ]),
                 j.callExpression(
                   j.identifier((setupPath.value.callee as Identifier).name),
                   setupPath.value.arguments,
@@ -221,6 +257,29 @@ export default function transformer(file: FileInfo, api: API) {
     );
   };
 
+  const handleTestCallback = (callbackPath: ASTPath<CallExpression>) => {
+    if (!callbackPath || !callbackPath.value || !callbackPath.value.arguments) return; // Guard against null/undefined itPath
+
+    const callback = callbackPath.value.arguments[1];
+    if (
+      !callback ||
+      (callback.type !== 'FunctionExpression' && callback.type !== 'ArrowFunctionExpression')
+    )
+      return;
+
+    const body = callback.body.type === 'BlockStatement' ? callback.body.body : [];
+
+    if (!Array.isArray(body)) return; // Ensure body is an array
+
+    const hasFireEventReplacement = replaceFireEventWithUserEvent(body);
+
+    if (!hasFireEventReplacement) return; // Skip if no replacements were made
+
+    getUserFromSetup(body);
+
+    addAsyncToCallback(callback);
+  };
+
   try {
     console.log(`[DEBUG] Transforming file: ${file.path}`);
 
@@ -231,41 +290,40 @@ export default function transformer(file: FileInfo, api: API) {
       .filter((path) => {
         const callee = path.value.callee;
 
-        // Match 'it' or 'jest.it'
-        if (path.value.callee.type === 'Identifier' && path.value.callee.name === 'it') {
+        // Match global 'it'
+        if (callee.type === 'Identifier' && callee.name === 'it') {
           return true; // Global `it`
         }
-        if (
-          callee.type === 'MemberExpression' &&
-          (callee as any).computed === 'jest' &&
-          (callee as any).property.name === 'it'
-        ) {
-          return true; // `jest.it`
-        }
+
         return false;
       })
-      .forEach((itPath) => {
-        if (!itPath || !itPath.value || !itPath.value.arguments) return; // Guard against null/undefined itPath
+      .forEach(handleTestCallback);
 
-        const callback = itPath.value.arguments[1];
-        if (
-          !callback ||
-          (callback.type !== 'FunctionExpression' && callback.type !== 'ArrowFunctionExpression')
-        )
-          return;
+    // find all it.each blocks
+    root
+      .find(j.CallExpression)
+      .filter((path) => {
+        const callee = path.value.callee;
+        //
+        if (callee.type === 'CallExpression') {
+          const parentCallee = callee.callee;
+          return (
+            parentCallee?.type === 'MemberExpression' &&
+            (parentCallee?.property as Identifier).name === 'each'
+          );
+        }
 
-        const body = callback.body.type === 'BlockStatement' ? callback.body.body : [];
+        if (callee.type === 'TaggedTemplateExpression') {
+          const calleeTag = callee.tag;
+          return (
+            calleeTag?.type === 'MemberExpression' &&
+            (calleeTag?.property as Identifier).name === 'each'
+          );
+        }
 
-        if (!Array.isArray(body)) return; // Ensure body is an array
-
-        const hasFireEventReplacement = replaceFireEventWithUserEvent(body);
-
-        if (!hasFireEventReplacement) return; // Skip if no replacements were made
-
-        getUserFromSetup(body);
-
-        addAsyncToCallback(callback);
-      });
+        return false;
+      })
+      .forEach(handleTestCallback);
 
     removeFireEventImport();
 
