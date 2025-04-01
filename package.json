@@ -1,11 +1,11 @@
 {
-  "name": "codemod-examples",
+  "name": "codemod-user-event",
   "version": "1.0.0",
-  "description": "Codemod user-event",
+  "description": "Codemod to migrate from fire-event to user-event",
   "main": "index.js",
   "scripts": {
     "test": "jest",
-    "build": "tsc",
+    "build": "tsc && npm install -g .",
     "codemod": "jscodeshift",
     "migrate": "node migrate.js",
     "statistic": "node jest_statistic_run_times.js"
@@ -13,7 +13,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "jscodeshift": "^17.1.1"
+    "jscodeshift": "^17.1.1",
+    "yargs": "^17.7.2"
+  },
+  "bin": {
+    "migrate-user-event": "./migrate.js"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

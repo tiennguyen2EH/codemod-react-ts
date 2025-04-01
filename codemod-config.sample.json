@@ -1,0 +1,4 @@
+{
+  "jestRunner": "jest",
+  "reportPath": "./caller-info.json"
+}
