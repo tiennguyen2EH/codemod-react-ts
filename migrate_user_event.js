@@ -200,7 +200,7 @@ const runPhase1FireEventToUserEvent = async (folderPath) => {
 
   // Get path to jscodeshift
   const jscodeshiftPath = findJscodeshiftPath();
-  const transformPath = path.join(__dirname, 'dist', 'fire-event-to-user-event.js');
+  const transformPath = path.join(__dirname, 'dist', 'user_event', 'fire-event-to-user-event.js');
   console.log(`Using transform file: ${transformPath}`);
 
   // Check if transform file exists
@@ -231,7 +231,7 @@ const runPhase2AddClear = async (config) => {
 
     // Get path to jscodeshift
     const jscodeshiftPath = findJscodeshiftPath();
-    const transformPath = path.join(__dirname, 'dist', 'add-clear-before-type.js');
+    const transformPath = path.join(__dirname, 'dist', 'user_event', 'add-clear-before-type.js');
 
     for (const [file, lines] of Object.entries(placesToMigrate)) {
       const linesForFile = lines.join(',');
@@ -256,7 +256,7 @@ const runPhase3AdvancedTypeToType = async (folderPath) => {
 
   // Get path to jscodeshift
   const jscodeshiftPath = findJscodeshiftPath();
-  const transformPath = path.join(__dirname, 'dist', 'advanced-type-to-type.js');
+  const transformPath = path.join(__dirname, 'dist', 'user_event', 'advanced-type-to-type.js');
   console.log(`Using transform file: ${transformPath}`);
 
   // Check if transform file exists
