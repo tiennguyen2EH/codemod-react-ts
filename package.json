@@ -8,6 +8,7 @@
     "build": "tsc && npm install -g .",
     "codemod": "jscodeshift",
     "migrate:user-event": "node migrate_user_event.js",
+    "migrate:legacy-format-function": "node migrate_legacy_format_function.js",
     "statistic:user-event": "node jest_statistic_run_times.js"
   },
   "author": "",
