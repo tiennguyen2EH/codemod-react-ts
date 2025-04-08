@@ -527,6 +527,12 @@ const hasLegacyFormatImports = (config: Config): boolean => {
  * Main transformer function
  */
 export default function transformer(file: FileInfo, api: API) {
+  // Quick check for presence of key imports before full parsing
+  if (!file.source.includes('eh-utils/time/format')) {
+    logger.debug(`Skipping file ${file.path} - no legacy format imports found in quick scan`);
+    return file.source;
+  }
+
   const j = api.jscodeshift;
   const root = j(file.source);
   const config: Config = { j, root, filePath: file.path };
@@ -534,9 +540,22 @@ export default function transformer(file: FileInfo, api: API) {
   try {
     logger.debug(`Transforming file: ${file.path}`);
 
-    // First check if the file has imports from 'eh-utils/time/format'
+    // Check if any legacy format functions are actually used
+    let hasLegacyFunctionUsage = false;
+    Object.keys(LEGACY_TO_NEW_FORMAT_MAP).forEach((legacyName) => {
+      if (file.source.includes(legacyName)) {
+        hasLegacyFunctionUsage = true;
+      }
+    });
+
+    if (!hasLegacyFunctionUsage) {
+      logger.debug(`Skipping file ${file.path} - no legacy function usage found in quick scan`);
+      return file.source;
+    }
+
+    // Now do the more expensive AST check for imports
     if (!hasLegacyFormatImports(config)) {
-      logger.debug(`Skipping file ${file.path} - no legacy format imports found`);
+      logger.debug(`Skipping file ${file.path} - no legacy format imports found in AST`);
       return file.source;
     }
 
@@ -546,11 +565,22 @@ export default function transformer(file: FileInfo, api: API) {
     // Handle imports if replacements were made
     if (hasReplacements) {
       handleImports(config);
+    } else {
+      logger.debug(`No replacements made in file: ${file.path}`);
+      return file.source; // Return early if no changes
     }
 
-    return root.toSource({ quote: 'single', trailingComma: true });
+    const result = root.toSource({ quote: 'single', trailingComma: true });
+
+    // Help garbage collection
+    (config as any) = null;
+
+    return result;
   } catch (error) {
     logger.error(`Transformation failed for file: ${file.path}`, error);
     return file.source;
+  } finally {
+    // Clear references to help garbage collection
+    (root as any) = null;
   }
 }
