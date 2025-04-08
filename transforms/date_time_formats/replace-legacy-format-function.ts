@@ -151,6 +151,34 @@ const LEGACY_TO_NEW_FORMAT_MAP = {
     newFunctionName: 'formatDate',
     newOptions: { formatType: 'date.medium', weekday: 'short' },
   },
+  formatDateLocalized: {
+    newFunctionName: 'formatDate',
+    newOptions: { formatType: 'date.short' },
+  },
+  formatCompactDateWithWeekdayWithoutYearLocalized: {
+    newFunctionName: 'formatDate',
+    newOptions: { formatType: 'dayMonth.medium', weekday: 'short' },
+  },
+  formatCompactDateWithoutYearLocalized: {
+    newFunctionName: 'formatDate',
+    newOptions: { formatType: 'dayMonth.medium' },
+  },
+  formatDateWithWeekDayLocalized: {
+    newFunctionName: 'formatDate',
+    newOptions: { formatType: 'date.short', weekday: 'short' },
+  },
+  formatLongDateLocalized: {
+    newFunctionName: 'formatDate',
+    newOptions: { formatType: 'date.medium' },
+  },
+  formatLongDayMonthLocalized: {
+    newFunctionName: 'formatDate',
+    newOptions: { formatType: 'dayMonth.medium' },
+  },
+  formatLongDayMonthWithWeekDayLocalized: {
+    newFunctionName: 'formatDate',
+    newOptions: { formatType: 'dayMonth.medium', weekday: 'short' },
+  },
 } as const;
 
 // AST creation utilities
