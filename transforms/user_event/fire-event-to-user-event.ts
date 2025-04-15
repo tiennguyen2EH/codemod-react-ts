@@ -54,7 +54,7 @@ type Config = {
 };
 
 type FireEventMethod = keyof typeof FIRE_EVENT_TO_USER_EVENT_MAP;
-type UserEventMethod = (typeof FIRE_EVENT_TO_USER_EVENT_MAP)[FireEventMethod];
+type UserEventMethod = (typeof FIRE_EVENT_TO_USER_EVENT_MAP)[FireEventMethod] | 'clear';
 
 // Constants
 const BASE_RENDER_METHODS = ['renderWithReduxForm', 'renderWithRedux', 'renderWithTheme'] as const;
@@ -86,6 +86,26 @@ const createUserEventCall = (method: UserEventMethod, args: any[], config: Confi
       args,
     ),
   );
+};
+
+// Special handling for creating user.type() call based on value type
+const createUserEventTypeCall = (element: any, value: any, config: Config) => {
+  // Handle empty string - use clear instead of type
+  if (value.value === '') {
+    return createUserEventCall('clear', [element], config);
+  }
+
+  // Handle number - convert to string for type
+  if (!isNaN(value.value)) {
+    return createUserEventCall(
+      'advancedType',
+      [element, config.j.stringLiteral(String(value.value))],
+      config,
+    );
+  }
+
+  // Default behavior for other values
+  return createUserEventCall('advancedType', [element, value], config);
 };
 
 const createUserProperty = (config: Config): Property => {
@@ -184,11 +204,11 @@ const replaceFireEventWithUserEvent = (blockBody: BlockStatement['body'], config
 
       if ((method === 'change' || method === 'input') && args.length === 2) {
         const [element, secondArg] = args;
+
         if (isTargetValueObject(secondArg)) {
           const value = extractValueFromTarget(secondArg);
-          config
-            .j(fireEventPath)
-            .replaceWith(createUserEventCall(userEventMethod, [element, value], config));
+
+          config.j(fireEventPath).replaceWith(createUserEventTypeCall(element, value, config));
           hasReplacement = true;
         }
       } else if (args.length === 1) {
