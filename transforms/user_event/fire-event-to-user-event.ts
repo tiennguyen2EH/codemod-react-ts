@@ -5,22 +5,32 @@
  * - Removes unused fireEvent imports from @testing-library/react
  * - Automatically cleans up import statements when fireEvent is no longer used
  * - Preserves other imports from @testing-library/react
+ * - Adds userEvent import with ExtendedUserEvent type when needed
  *
  * Event Migration:
  * - Converts fireEvent methods to userEvent methods based on FIRE_EVENT_TO_USER_EVENT_MAP
  * - Handles special cases for change/input events with target.value
  * - Makes test callbacks async when needed
+ * - Handles empty string inputs with user.clear() and number inputs with proper conversion
  *
  * Setup Function Handling:
  * - Supports multiple setup function names (SUPPORTED_RENDER_METHODS)
  * - Automatically adds user to destructured setup results
  * - Preserves existing destructuring patterns
+ * - Handles direct awaits and variable declarations
  *
  * Test Block Processing:
  * - Processes both global it and it.each test blocks
  * - Makes test callbacks async when needed
  * - Preserves existing test structure and assertions
  * - Maintains test block context and scope
+ *
+ * Helper Function Processing:
+ * - Identifies helper functions containing fireEvent calls
+ * - Adds user parameter with ExtendedUserEvent type to these functions
+ * - Makes helper functions async when they contain userEvent calls
+ * - Updates all calls to helper functions to pass user parameter
+ * - Adds await to calls of async helper functions
  *
  * Error Handling:
  * - Gracefully handles null/undefined AST nodes
@@ -31,19 +41,23 @@
 
 import type {
   API,
+  ArrowFunctionExpression,
+  ASTPath,
+  AwaitExpression,
   BlockStatement,
+  CallExpression,
+  Collection,
+  Expression,
   FileInfo,
+  FunctionExpression,
   Identifier,
   ImportSpecifier,
-  CallExpression,
-  ASTPath,
   JSCodeshift,
-  Collection,
+  MemberExpression,
   Node,
-  FunctionExpression,
-  ArrowFunctionExpression,
   ObjectPattern,
   Property,
+  VariableDeclarator,
 } from 'jscodeshift';
 
 // Types
@@ -52,9 +66,6 @@ type Config = {
   root: Collection<Node>;
   filePath: string;
 };
-
-// We will import this type explicitly instead of defining it
-// type ExtendedUserEvent = any;
 
 type FireEventMethod = keyof typeof FIRE_EVENT_TO_USER_EVENT_MAP;
 type UserEventMethod = (typeof FIRE_EVENT_TO_USER_EVENT_MAP)[FireEventMethod] | 'clear';
@@ -76,30 +87,44 @@ const FIRE_EVENT_TO_USER_EVENT_MAP = {
   mouseOver: 'hover',
   mouseEnter: 'hover',
   mouseOut: 'unhover',
+  mouseMove: 'hover',
   blur: 'blur',
   change: 'advancedType',
   input: 'advancedType',
 } as const;
 
-// Utility Functions
-const createUserEventCall = (method: UserEventMethod, args: any[], config: Config) => {
-  return config.j.awaitExpression(
-    config.j.callExpression(
-      config.j.memberExpression(config.j.identifier('user'), config.j.identifier(method)),
-      args,
-    ),
-  );
+// AST Utility Functions
+const createAwaitExpression = (expression: any, config: Config): AwaitExpression => {
+  return config.j.awaitExpression(expression);
+};
+
+const createMemberExpression = (
+  object: Identifier,
+  property: string,
+  config: Config,
+): MemberExpression => {
+  return config.j.memberExpression(object, config.j.identifier(property));
+};
+
+const createUserEventCall = (
+  method: UserEventMethod,
+  args: any[],
+  config: Config,
+): AwaitExpression => {
+  const userMember = createMemberExpression(config.j.identifier('user'), method, config);
+  const callExpr = config.j.callExpression(userMember, args as any);
+  return createAwaitExpression(callExpr, config);
 };
 
 // Special handling for creating user.type() call based on value type
-const createUserEventTypeCall = (element: any, value: any, config: Config) => {
+const createUserEventTypeCall = (element: any, value: any, config: Config): AwaitExpression => {
   // Handle empty string - use clear instead of type
   if (value.value === '') {
     return createUserEventCall('clear', [element], config);
   }
 
   // Handle number - convert to string for type
-  if (!isNaN(value.value)) {
+  if (!isNaN(Number(value.value))) {
     return createUserEventCall(
       'advancedType',
       [element, config.j.stringLiteral(String(value.value))],
@@ -111,13 +136,17 @@ const createUserEventTypeCall = (element: any, value: any, config: Config) => {
   return createUserEventCall('advancedType', [element, value], config);
 };
 
-const createUserProperty = (config: Config): Property => {
+const createProperty = (key: string, value: any, shorthand: boolean, config: Config): Property => {
   return config.j.property.from({
     kind: 'init',
-    key: config.j.identifier('user'),
-    value: config.j.identifier('user'),
-    shorthand: true,
+    key: config.j.identifier(key),
+    value: value as any,
+    shorthand,
   });
+};
+
+const createUserProperty = (config: Config): Property => {
+  return createProperty('user', config.j.identifier('user'), true, config);
 };
 
 const createObjectPattern = (properties: Property[], config: Config): ObjectPattern => {
@@ -125,7 +154,7 @@ const createObjectPattern = (properties: Property[], config: Config): ObjectPatt
 };
 
 const createVariableDeclaration = (id: ObjectPattern, init: any, config: Config) => {
-  return config.j.variableDeclaration('const', [config.j.variableDeclarator(id, init)]);
+  return config.j.variableDeclaration('const', [config.j.variableDeclarator(id, init as any)]);
 };
 
 // Import Management
@@ -161,30 +190,60 @@ const removeFireEventImport = (config: Config) => {
     });
 };
 
-// Event Handling
+// Target Value Utilities
 const isTargetValueObject = (obj: any): boolean => {
-  return (
-    obj.type === 'ObjectExpression' &&
-    obj.properties.some(
-      (prop: any) =>
-        prop.key.type === 'Identifier' &&
-        prop.key.name === 'target' &&
-        prop.value.type === 'ObjectExpression' &&
-        prop.value.properties.some(
-          (innerProp) => innerProp.key.type === 'Identifier' && innerProp.key.name === 'value',
-        ),
-    )
-  );
+  if (obj.type !== 'ObjectExpression') return false;
+
+  return (obj as any).properties.some((prop: any) => {
+    if (prop.type !== 'Property' && prop.type !== 'ObjectProperty') return false;
+    return (
+      prop.key &&
+      prop.key.type === 'Identifier' &&
+      prop.key.name === 'target' &&
+      prop.value &&
+      prop.value.type === 'ObjectExpression' &&
+      prop.value.properties.some((innerProp: any) => {
+        if (innerProp.type !== 'Property' && innerProp.type !== 'ObjectProperty') return false;
+        return (
+          innerProp.key && innerProp.key.type === 'Identifier' && innerProp.key.name === 'value'
+        );
+      })
+    );
+  });
 };
 
 const extractValueFromTarget = (obj: any): any => {
-  const targetProperty = obj.properties.find((prop: any) => prop.key.name === 'target');
-  const valueProperty = targetProperty.value.properties.find(
-    (innerProp) => innerProp.key.name === 'value',
-  );
-  return valueProperty.value;
+  const targetProperty = (obj as any).properties.find((prop: any) => {
+    if (prop.type !== 'Property' && prop.type !== 'ObjectProperty') return false;
+    return prop.key && prop.key.type === 'Identifier' && prop.key.name === 'target';
+  });
+
+  if (
+    !targetProperty ||
+    !(targetProperty as any).value ||
+    (targetProperty as any).value.type !== 'ObjectExpression'
+  ) {
+    throw new Error('Invalid target property');
+  }
+
+  const valueProperty = (targetProperty as any).value.properties.find((innerProp: any) => {
+    if (innerProp.type !== 'Property' && innerProp.type !== 'ObjectProperty') return false;
+    return innerProp.key && innerProp.key.type === 'Identifier' && innerProp.key.name === 'value';
+  });
+
+  if (!valueProperty || !(valueProperty as any).value) {
+    throw new Error('No value property found');
+  }
+
+  const value = (valueProperty as any).value;
+  if (value.type !== 'StringLiteral' && value.type !== 'NumericLiteral') {
+    throw new Error('Value must be a string or number literal');
+  }
+
+  return value;
 };
 
+// Event Handling
 const replaceFireEventWithUserEvent = (
   blockBody: BlockStatement['body'],
   config: Config,
@@ -199,7 +258,7 @@ const replaceFireEventWithUserEvent = (
       // Ensure callee is a MemberExpression
       if (fireEventPath.value.callee.type !== 'MemberExpression') return;
 
-      const callee = fireEventPath.value.callee;
+      const callee = fireEventPath.value.callee as MemberExpression;
       if (!callee.property || callee.property.type !== 'Identifier') return;
 
       const method = callee.property.name as FireEventMethod;
@@ -209,16 +268,21 @@ const replaceFireEventWithUserEvent = (
       if (!userEventMethod) return;
 
       if ((method === 'change' || method === 'input') && args.length === 2) {
-        const [element, secondArg] = args;
+        const [element, secondArg] = args as [any, any];
 
-        if (isTargetValueObject(secondArg)) {
-          const value = extractValueFromTarget(secondArg);
-
-          config.j(fireEventPath).replaceWith(createUserEventTypeCall(element, value, config));
-          hasReplacement = true;
+        if (isTargetValueObject(secondArg) && secondArg.type === 'ObjectExpression') {
+          try {
+            const value = extractValueFromTarget(secondArg as any);
+            config.j(fireEventPath).replaceWith(createUserEventTypeCall(element, value, config));
+            hasReplacement = true;
+          } catch (e) {
+            console.error(`[ERROR] Failed to extract value from target: ${e.message}`);
+          }
         }
       } else if (args.length === 1) {
-        config.j(fireEventPath).replaceWith(createUserEventCall(userEventMethod, args, config));
+        config
+          .j(fireEventPath)
+          .replaceWith(createUserEventCall(userEventMethod, args as any[], config));
         hasReplacement = true;
       }
     });
@@ -230,41 +294,46 @@ const replaceFireEventWithUserEvent = (
 };
 
 // Setup Function Handling
-const handleDirectAwaitSetup = (parentPath: ASTPath<any>, setupCall: any, config: Config) => {
+const handleDirectAwaitSetup = (
+  parentPath: ASTPath<any>,
+  setupCall: Expression,
+  config: Config,
+) => {
   const userPattern = createObjectPattern([createUserProperty(config)], config);
-  config
-    .j(parentPath)
-    .replaceWith(
-      createVariableDeclaration(userPattern, config.j.awaitExpression(setupCall), config),
-    );
+  const variableDecl = createVariableDeclaration(
+    userPattern,
+    createAwaitExpression(setupCall, config),
+    config,
+  );
+  config.j(parentPath.get()).replaceWith(variableDecl);
 };
 
 const handleVariableDeclaratorSetup = (
-  declarator: any,
+  declarator: VariableDeclarator,
   setupCall: any,
   isAwaited: boolean,
   config: Config,
 ) => {
   if (declarator.id.type === 'ObjectPattern') {
-    const userExists = declarator.id.properties.some((prop) => prop.key.name === 'user');
+    const userExists = declarator.id.properties.some((prop: any) => {
+      if (prop.type !== 'Property') return false;
+      return prop.key && prop.key.type === 'Identifier' && prop.key.name === 'user';
+    });
     if (!userExists) {
       declarator.id.properties.push(createUserProperty(config));
     }
-  } else {
+  } else if (declarator.id.type === 'Identifier') {
+    const idName = declarator.id.name;
     declarator.id = createObjectPattern(
       [
         createUserProperty(config),
-        config.j.property.from({
-          kind: 'init',
-          key: declarator.id,
-          value: declarator.id,
-          shorthand: true,
-        }),
+        createProperty(idName, config.j.identifier(idName), true, config),
       ],
       config,
     );
   }
-  declarator.init = isAwaited ? config.j.awaitExpression(setupCall) : setupCall;
+
+  declarator.init = isAwaited ? createAwaitExpression(setupCall as any, config) : setupCall;
 };
 
 const getUserFromSetup = (blockBody: BlockStatement['body'], config: Config) => {
@@ -311,7 +380,7 @@ const getUserFromSetup = (blockBody: BlockStatement['body'], config: Config) => 
           .replaceWith(
             createVariableDeclaration(
               userPattern,
-              isAwaited ? config.j.awaitExpression(setupCall) : setupCall,
+              isAwaited ? createAwaitExpression(setupCall, config) : setupCall,
               config,
             ),
           );
@@ -355,7 +424,7 @@ const handleTestCallback = (callbackPath: ASTPath<CallExpression>, config: Confi
   addAsyncToCallback(callback, config);
 };
 
-// Function to identify helper function calls in test blocks
+// Helper Function Processing
 const identifyAndUpdateHelperFunctionCalls = (
   blockBody: BlockStatement['body'],
   config: Config,
@@ -421,6 +490,16 @@ const identifyAndUpdateHelperFunctionCalls = (
   return hasUpdated;
 };
 
+const createUserTypeAnnotation = (config: Config) => {
+  return config.j.tsTypeAnnotation(
+    config.j.tsTypeReference(config.j.identifier('ExtendedUserEvent')),
+  );
+};
+
+const isSetupFunction = (name: string): boolean => {
+  return POSSIBLE_SUPPORTED_RENDER_METHODS.includes(name as any);
+};
+
 // Helper function to detect and modify independent helper functions
 const handleHelperFunctions = (config: Config): boolean => {
   let modifiedAnyFunction = false;
@@ -430,7 +509,7 @@ const handleHelperFunctions = (config: Config): boolean => {
     .find(config.j.FunctionDeclaration)
     .filter((path) => {
       // Exclude setup functions
-      if (path.value.id && POSSIBLE_SUPPORTED_RENDER_METHODS.includes(path.value.id.name as any)) {
+      if (path.value.id && isSetupFunction(path.value.id.name)) {
         return false;
       }
 
@@ -451,9 +530,7 @@ const handleHelperFunctions = (config: Config): boolean => {
       if (!userParamExists) {
         // Create a new identifier parameter with type annotation
         const userParam = config.j.identifier('user');
-        userParam.typeAnnotation = config.j.tsTypeAnnotation(
-          config.j.tsTypeReference(config.j.identifier('ExtendedUserEvent')),
-        );
+        userParam.typeAnnotation = createUserTypeAnnotation(config);
 
         // Add the parameter to the function
         path.value.params.push(userParam);
@@ -494,7 +571,7 @@ const handleHelperFunctions = (config: Config): boolean => {
       if (
         path.value.id &&
         path.value.id.type === 'Identifier' &&
-        POSSIBLE_SUPPORTED_RENDER_METHODS.includes(path.value.id.name as any)
+        isSetupFunction(path.value.id.name)
       ) {
         return false;
       }
@@ -519,9 +596,7 @@ const handleHelperFunctions = (config: Config): boolean => {
       if (!userParamExists) {
         // Create a new identifier parameter with type annotation
         const userParam = config.j.identifier('user');
-        userParam.typeAnnotation = config.j.tsTypeAnnotation(
-          config.j.tsTypeReference(config.j.identifier('ExtendedUserEvent')),
-        );
+        userParam.typeAnnotation = createUserTypeAnnotation(config);
 
         // Add the parameter to the function
         func.params.push(userParam);
@@ -638,7 +713,7 @@ const updateHelperFunctionCalls = (config: Config) => {
 
           if (!isAlreadyAwaited) {
             // Create new await expression
-            const awaitExpression = config.j.awaitExpression(path.value);
+            const awaitExpression = createAwaitExpression(path.value, config);
 
             // Replace the call expression with await expression
             config.j(path).replaceWith(awaitExpression);
@@ -665,7 +740,7 @@ const addUserEventImport = (shouldImportExtendedUserEvent: boolean, config: Conf
     return;
   }
 
-  // Ensure 'screen' is imported from '@testing-library/react'
+  // Check for existing userEvent import
   const userEventImport = config.root.find(config.j.ImportDeclaration, {
     source: {
       value: '@testing-library/user-event',
