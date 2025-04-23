@@ -99,6 +99,9 @@ const FIRE_EVENT_TO_USER_EVENT_MAP = {
   input: 'advancedType',
   focusIn: 'hover',
   focusOut: 'unhover',
+  doubleClick: 'dblClick',
+  keyDown: 'keyboard',
+  keyUp: 'keyboard',
 } as const;
 
 // AST Utility Functions
@@ -140,8 +143,72 @@ const createUserEventTypeCall = (element: any, value: any, config: Config): Awai
     );
   }
 
+  // Handle identifier (like jobTitle) - pass directly
+  if (value.type === 'Identifier') {
+    return createUserEventCall('advancedType', [element, value], config);
+  }
+
   // Default behavior for other values
   return createUserEventCall('advancedType', [element, value], config);
+};
+
+// Special handling for creating user.keyboard() call based on key event
+const createUserEventKeyboardCall = (
+  element: any,
+  keyEvent: any,
+  config: Config,
+): AwaitExpression => {
+  // Extract key value from the second argument if it exists
+  let keyValue = '';
+
+  if (keyEvent && keyEvent.type === 'ObjectExpression') {
+    const properties = keyEvent.properties || [];
+
+    // Find the 'key' property in the object
+    const keyProp = properties.find(
+      (prop: any) => prop.key && prop.key.type === 'Identifier' && prop.key.name === 'key',
+    );
+
+    if (keyProp && keyProp.value) {
+      // Handle different value types (Literal and StringLiteral)
+      if (keyProp.value.type === 'StringLiteral' || keyProp.value.type === 'Literal') {
+        keyValue = keyProp.value.value;
+        console.log(`[DEBUG] Extracted key value: '${keyValue}'`);
+      }
+    } else {
+      // If no 'key' property, try to find 'code' property
+      const codeProp = properties.find(
+        (prop: any) => prop.key && prop.key.type === 'Identifier' && prop.key.name === 'code',
+      );
+
+      if (codeProp && codeProp.value) {
+        // Handle different value types (Literal and StringLiteral)
+        if (codeProp.value.type === 'StringLiteral' || codeProp.value.type === 'Literal') {
+          keyValue = codeProp.value.value;
+          console.log(`[DEBUG] Extracted code value: '${keyValue}'`);
+        }
+      }
+    }
+  }
+
+  // Format the key for userEvent.keyboard
+  // Special keys should be wrapped in curly braces
+  const specialKeys = [
+    'Enter',
+    'Tab',
+    'Escape',
+    'Backspace',
+    'Delete',
+    'ArrowUp',
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+  ];
+  const formattedKey = specialKeys.includes(keyValue) ? `{${keyValue}}` : keyValue;
+
+  console.log(`[DEBUG] Converting keyboard event with key '${keyValue}' to '${formattedKey}'`);
+
+  return createUserEventCall('keyboard', [config.j.stringLiteral(formattedKey)], config);
 };
 
 const createProperty = (key: string, value: any, shorthand: boolean, config: Config): Property => {
@@ -244,8 +311,15 @@ const extractValueFromTarget = (obj: any): any => {
   }
 
   const value = (valueProperty as any).value;
-  if (value.type !== 'StringLiteral' && value.type !== 'NumericLiteral') {
-    throw new Error('Value must be a string or number literal');
+
+  // Accept StringLiteral, NumericLiteral, or Identifier
+  if (
+    value.type !== 'StringLiteral' &&
+    value.type !== 'NumericLiteral' &&
+    value.type !== 'Literal' &&
+    value.type !== 'Identifier'
+  ) {
+    throw new Error('Value must be a string literal, number literal, or identifier');
   }
 
   return value;
@@ -284,9 +358,23 @@ const replaceFireEventWithUserEvent = (
             config.j(fireEventPath).replaceWith(createUserEventTypeCall(element, value, config));
             hasReplacement = true;
           } catch (e) {
+            config
+              .j(fireEventPath)
+              .replaceWith(createUserEventCall(userEventMethod, args as any[], config));
             console.error(`[ERROR] Failed to extract value from target: ${e.message}`);
           }
+        } else {
+          config
+            .j(fireEventPath)
+            .replaceWith(createUserEventCall(userEventMethod, args as any[], config));
         }
+      } else if ((method === 'keyDown' || method === 'keyUp') && args.length === 2) {
+        // Handle keyboard events
+        const [element, keyEventArg] = args as [any, any];
+        config
+          .j(fireEventPath)
+          .replaceWith(createUserEventKeyboardCall(element, keyEventArg, config));
+        hasReplacement = true;
       } else if (args.length === 1) {
         config
           .j(fireEventPath)
@@ -421,6 +509,7 @@ const handleTestCallback = (callbackPath: ASTPath<CallExpression>, config: Confi
   if (!Array.isArray(body)) return;
 
   const hasFireEventReplacement = replaceFireEventWithUserEvent(body, config);
+  prefixUserEventWithView(body, config);
 
   // Identify helper function calls in test blocks and update them to pass the user parameter
   const modifiedHelperFunctionCalls = identifyAndUpdateHelperFunctionCalls(body, config);
@@ -428,7 +517,10 @@ const handleTestCallback = (callbackPath: ASTPath<CallExpression>, config: Confi
   // Only proceed with additional changes if we replaced fireEvent or updated helper functions
   if (!hasFireEventReplacement && !modifiedHelperFunctionCalls) return;
 
-  getUserFromSetup(body, config);
+  if (!hasViewDeclarationFromRenderMethods(body, config)) {
+    getUserFromSetup(body, config);
+  }
+
   addAsyncToCallback(callback, config);
 };
 
@@ -547,6 +639,7 @@ const handleHelperFunctions = (config: Config): boolean => {
         let containsUserEventCalls = false;
         if (path.value.body && path.value.body.type === 'BlockStatement') {
           containsUserEventCalls = replaceFireEventWithUserEvent(path.value.body.body, config);
+          prefixUserEventWithView(path.value.body.body, config);
         }
 
         // Make the function async if it contains userEvent calls
@@ -613,6 +706,7 @@ const handleHelperFunctions = (config: Config): boolean => {
         let containsUserEventCalls = false;
         if (func.body && func.body.type === 'BlockStatement') {
           containsUserEventCalls = replaceFireEventWithUserEvent(func.body.body, config);
+          prefixUserEventWithView(func.body.body, config);
         }
 
         // Make the function async if it contains userEvent calls
@@ -800,6 +894,167 @@ const addUserEventImport = (shouldImportExtendedUserEvent: boolean, config: Conf
   }
 };
 
+/**
+ * Transforms user.method() calls to view.user.method() calls
+ *
+ * This function:
+ * - Finds all user.method() calls and prefixes them with view
+ * - Handles both direct calls and calls within await expressions
+ * - Preserves method names and arguments
+ * - Works on user.type, user.click, etc.
+ *
+ * @param {BlockStatement['body']} blockBody - The body of a block statement to search for user.method calls
+ * @param {Config} config - The codemod configuration object
+ * @returns {boolean} - True if any transformations were made, false otherwise
+ */
+const prefixUserEventWithView = (blockBody: BlockStatement['body'], config: Config): boolean => {
+  if (!hasViewDeclarationFromRenderMethods(blockBody, config)) {
+    return false;
+  }
+
+  let hasModification = false;
+
+  // First, handle direct user.method() calls
+  config
+    .j(blockBody)
+    .find(config.j.CallExpression, {
+      callee: {
+        type: 'MemberExpression',
+        object: { name: 'user' },
+      },
+    })
+    .forEach((userEventPath) => {
+      if (!userEventPath?.value?.callee) return;
+
+      // Ensure callee is a MemberExpression
+      if (userEventPath.value.callee.type !== 'MemberExpression') return;
+
+      const callee = userEventPath.value.callee as MemberExpression;
+      if (!callee.property || callee.property.type !== 'Identifier') return;
+
+      // Get the method name (e.g., click, type)
+      const method = callee.property.name;
+
+      console.log(`[DEBUG] Processing user.${method} to add view prefix`);
+
+      // Create view.user.method member expression
+      // First create user.method
+      const userMethod = config.j.memberExpression(
+        config.j.identifier('user'),
+        config.j.identifier(method),
+        false, // computed: false for dot notation
+      );
+
+      // Then create view.user.method
+      const viewUserMember = config.j.memberExpression(
+        config.j.identifier('view'),
+        userMethod,
+        false, // computed: false for dot notation
+      );
+
+      // Replace user.method with view.user.method, preserving the arguments
+      config
+        .j(userEventPath)
+        .replaceWith(config.j.callExpression(viewUserMember, userEventPath.value.arguments));
+
+      hasModification = true;
+    });
+
+  // Then, handle await expressions that contain user.method() calls
+  config
+    .j(blockBody)
+    .find(config.j.AwaitExpression)
+    .forEach((awaitPath) => {
+      if (!awaitPath?.value?.argument) return;
+
+      const argument = awaitPath.value.argument;
+      if (argument.type !== 'CallExpression') return;
+
+      const callExpr = argument as CallExpression;
+      if (!callExpr.callee || callExpr.callee.type !== 'MemberExpression') return;
+
+      const callee = callExpr.callee as MemberExpression;
+      if (!callee.object || callee.object.type !== 'Identifier' || callee.object.name !== 'user')
+        return;
+      if (!callee.property || callee.property.type !== 'Identifier') return;
+
+      // Get the method name (e.g., click, type)
+      const method = callee.property.name;
+
+      console.log(`[DEBUG] Processing await user.${method} to add view prefix`);
+
+      // Create view.user.method member expression
+      // First create user.method
+      const userMethod = config.j.memberExpression(
+        config.j.identifier('user'),
+        config.j.identifier(method),
+        false, // computed: false for dot notation
+      );
+
+      // Then create view.user.method
+      const viewUserMember = config.j.memberExpression(
+        config.j.identifier('view'),
+        userMethod,
+        false, // computed: false for dot notation
+      );
+
+      // Replace user.method with view.user.method inside the await expression
+      const newCallExpr = config.j.callExpression(viewUserMember, callExpr.arguments);
+      awaitPath.value.argument = newCallExpr;
+
+      hasModification = true;
+    });
+
+  if (hasModification) {
+    console.log(`[DEBUG] Added view prefix to user calls in file: ${config.filePath}`);
+  }
+  return hasModification;
+};
+
+/**
+ * Checks if a 'view' variable is declared with a supported render method
+ * e.g., const view = renderWithRedux() or const view = render()
+ *
+ * @param {BlockStatement['body']} blockBody - The body of a block statement to search for view variable declaration
+ * @param {Config} config - The codemod configuration object
+ * @returns {boolean} - True if a 'view' variable declaration using a supported render method exists
+ */
+const hasViewDeclarationFromRenderMethods = (
+  blockBody: BlockStatement['body'],
+  config: Config,
+): boolean => {
+  let foundViewDeclaration = false;
+
+  config
+    .j(blockBody)
+    .find(config.j.VariableDeclarator)
+    .forEach((varDeclPath) => {
+      // Look for const view = ...
+      if (
+        varDeclPath.value.type === 'VariableDeclarator' &&
+        varDeclPath.value.id.type === 'Identifier' &&
+        varDeclPath.value.id.name === 'view'
+      ) {
+        // Check if initialization is a call to a supported render method
+        if (
+          varDeclPath.value.init &&
+          varDeclPath.value.init.type === 'CallExpression' &&
+          varDeclPath.value.init.callee.type === 'Identifier'
+        ) {
+          const calleeName = varDeclPath.value.init.callee.name;
+          if (POSSIBLE_SUPPORTED_RENDER_METHODS.includes(calleeName as any)) {
+            console.log(
+              `[DEBUG] Found view declaration using ${calleeName} in file: ${config.filePath}`,
+            );
+            foundViewDeclaration = true;
+          }
+        }
+      }
+    });
+
+  return foundViewDeclaration;
+};
+
 // Main Transformer
 export default function transformer(file: FileInfo, api: API) {
   const j = api.jscodeshift;
@@ -815,11 +1070,44 @@ export default function transformer(file: FileInfo, api: API) {
     // Add userEvent import (with ExtendedUserEvent type if helper functions were found)
     addUserEventImport(hasHelperFunctionsWithFireEvent, config);
 
-    // Process global 'it' tests
+    // Process all test blocks and apply user event prefix
     root
       .find(j.CallExpression)
-      .filter((path) => path.value.callee.type === 'Identifier' && path.value.callee.name === 'it')
-      .forEach((path) => handleTestCallback(path, config));
+      .filter(
+        (path) =>
+          path.value.callee.type === 'Identifier' &&
+          (path.value.callee.name === 'it' || path.value.callee.name === 'test'),
+      )
+      .forEach((path) => {
+        handleTestCallback(path, config);
+
+        // Apply view.user prefix to all user.method calls
+        if (
+          path.value.arguments[1] &&
+          (path.value.arguments[1].type === 'FunctionExpression' ||
+            path.value.arguments[1].type === 'ArrowFunctionExpression')
+        ) {
+          const body =
+            path.value.arguments[1].body.type === 'BlockStatement'
+              ? path.value.arguments[1].body.body
+              : [];
+          if (Array.isArray(body)) {
+          }
+        }
+      });
+
+    // Process 'it.skip' and 'test.skip' tests
+    root
+      .find(j.CallExpression)
+      .filter((path) => {
+        const callee = path.value.callee;
+        return (
+          callee?.type === 'MemberExpression' && (callee?.property as Identifier).name === 'skip'
+        );
+      })
+      .forEach((path) => {
+        handleTestCallback(path, config);
+      });
 
     // Process 'it.each' tests
     root
@@ -840,7 +1128,26 @@ export default function transformer(file: FileInfo, api: API) {
         }
         return false;
       })
-      .forEach((path) => handleTestCallback(path, config));
+      .forEach((path) => {
+        handleTestCallback(path, config);
+      });
+
+    // Process setup functions that has fireEvent calls inside
+    root
+      .find(j.VariableDeclaration)
+      .filter(
+        (path) =>
+          path.value.declarations[0].type === 'VariableDeclarator' &&
+          POSSIBLE_SUPPORTED_RENDER_METHODS.includes((path.value.declarations[0].id as any).name),
+      )
+      .forEach((path) => {
+        const declaration = path.value.declarations[0] as any;
+        const body =
+          declaration.init?.body.type === 'BlockStatement' ? declaration.init?.body.body : [];
+        if (!Array.isArray(body)) return;
+        replaceFireEventWithUserEvent(body, config);
+        prefixUserEventWithView(body, config);
+      });
 
     removeFireEventImport(config);
 
