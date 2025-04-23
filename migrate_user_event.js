@@ -344,17 +344,6 @@ const main = async () => {
   // Phase 1: Convert fire-event to user-event
   await runPhase1FireEventToUserEvent(folderPath);
 
-  // Run tests to collect caller info before Phase 2
-  await runJestTests(config.jestRunner, folderPath);
-
-  // Phase 2: Add clear commands where needed
-  console.log(`Running Phase 2 with report from: ${config.reportPath}`);
-  await runPhase2AddClear(config);
-
-  // Phase 3: Migrate user.advancedType to user.type
-  console.log('Running Phase 3: Migrate advancedType to type');
-  await runPhase3AdvancedTypeToType(folderPath);
-
   console.log('All operations completed successfully');
 
   // Run tests again to ensure no regressions
