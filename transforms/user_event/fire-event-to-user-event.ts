@@ -77,6 +77,12 @@ const POSSIBLE_SUPPORTED_RENDER_METHODS = [
   'setUp',
   'setup',
   'setupTest',
+  'renderComponent',
+  'setUpAndRenderComponentWithMockData',
+  'prepareDataAndRender',
+  'setUpAndRender',
+  'render',
+  'renderForm',
   ...BASE_RENDER_METHODS,
 ] as const;
 
@@ -91,6 +97,8 @@ const FIRE_EVENT_TO_USER_EVENT_MAP = {
   blur: 'blur',
   change: 'advancedType',
   input: 'advancedType',
+  focusIn: 'hover',
+  focusOut: 'unhover',
 } as const;
 
 // AST Utility Functions
