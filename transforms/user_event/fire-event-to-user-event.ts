@@ -94,6 +94,7 @@ const FIRE_EVENT_TO_USER_EVENT_MAP = {
   mouseEnter: 'hover',
   mouseOut: 'unhover',
   mouseMove: 'hover',
+  mouseLeave: 'unhover',
   blur: 'blur',
   change: 'advancedType',
   input: 'advancedType',
