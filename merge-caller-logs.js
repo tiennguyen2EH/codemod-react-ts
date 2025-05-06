@@ -77,11 +77,16 @@ function mergeCallerInfoFiles(filesArray) {
     try {
       const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
-      // Update test run info with the latest values
+      // Sum the test run info numeric values
       if (fileData.testRunInfo) {
-        // Keep only the most recent test run info
-        if (new Date(fileData.testRunInfo.timestamp) > new Date(mergedData.testRunInfo.timestamp)) {
-          mergedData.testRunInfo = fileData.testRunInfo;
+        if (typeof fileData.testRunInfo.numPassedTests === 'number') {
+          mergedData.testRunInfo.numPassedTests += fileData.testRunInfo.numPassedTests;
+        }
+        if (typeof fileData.testRunInfo.numFailedTests === 'number') {
+          mergedData.testRunInfo.numFailedTests += fileData.testRunInfo.numFailedTests;
+        }
+        if (typeof fileData.testRunInfo.numTotalTests === 'number') {
+          mergedData.testRunInfo.numTotalTests += fileData.testRunInfo.numTotalTests;
         }
       }
 
