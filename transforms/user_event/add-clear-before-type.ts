@@ -33,7 +33,6 @@ export default function transformer(file: FileInfo, api: API, options: { lines?:
     const advancedTypeCalls = root.find(j.CallExpression, {
       callee: {
         type: 'MemberExpression',
-        object: { type: 'Identifier', name: 'user' },
         property: { type: 'Identifier', name: 'advancedType' },
       },
     });
