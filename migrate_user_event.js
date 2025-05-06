@@ -341,12 +341,6 @@ const main = async () => {
   console.log(`Using reportPath: "${config.reportPath}"`);
   console.log(`Target folder path: "${folderPath}"`);
 
-  // Phase 1: Convert fire-event to user-event
-  await runPhase1FireEventToUserEvent(folderPath);
-
-  // Run tests to collect caller info before Phase 2
-  await runJestTests(config.jestRunner, folderPath);
-
   // Phase 2: Add clear commands where needed
   console.log(`Running Phase 2 with report from: ${config.reportPath}`);
   await runPhase2AddClear(config);
