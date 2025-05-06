@@ -14,18 +14,26 @@
 
 import type { API, FileInfo } from 'jscodeshift';
 
+import { Config } from './shared';
+
+const getLinesToProcess = (lines: string | number | undefined) => {
+  if (!lines) return [];
+  if (typeof lines === 'number') return [lines];
+  const lineNumbers = lines.split(',').map((line) => parseInt(line, 10));
+  return lineNumbers.filter((line) => !isNaN(line));
+};
+
 // Main Transformer
 export default function transformer(file: FileInfo, api: API, options: { lines?: string }) {
   const j = api.jscodeshift;
   const root = j(file.source);
+  const config: Config = { j, root, filePath: file.path };
 
   try {
     console.log(`[DEBUG] Transforming file: ${file.path}`);
 
     // Parse line numbers from options
-    const linesToProcess = options.lines
-      ? options.lines.split(',').map((line) => parseInt(line, 10))
-      : [];
+    const linesToProcess = getLinesToProcess(options.lines);
 
     console.log(`[DEBUG] Processing lines: ${linesToProcess.join(', ')}`);
 
@@ -33,7 +41,6 @@ export default function transformer(file: FileInfo, api: API, options: { lines?:
     const advancedTypeCalls = root.find(j.CallExpression, {
       callee: {
         type: 'MemberExpression',
-        object: { type: 'Identifier', name: 'user' },
         property: { type: 'Identifier', name: 'advancedType' },
       },
     });
