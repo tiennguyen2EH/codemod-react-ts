@@ -53,6 +53,10 @@ export const handleVariableDeclaratorSetup = (
 };
 
 export const getUserFromSetup = (blockBody: BlockStatement['body'], config: Config) => {
+  if (hasUserDestructured(blockBody, config)) {
+    return;
+  }
+
   config
     .j(blockBody)
     .find(config.j.CallExpression, {
@@ -150,4 +154,16 @@ export const hasViewDeclarationFromRenderMethods = (
     });
 
   return foundViewDeclaration;
+};
+
+export const hasUserDestructured = (blockBody: BlockStatement['body'], config: Config): boolean => {
+  return config
+    .j(blockBody)
+    .find(config.j.VariableDeclarator)
+    .some((varDeclPath) => {
+      return (
+        varDeclPath.value.id.type === 'ObjectPattern' &&
+        varDeclPath.value.id.properties.some((prop) => (prop as any).key.name === 'user')
+      );
+    });
 };
