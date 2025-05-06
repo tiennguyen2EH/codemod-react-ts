@@ -7,29 +7,34 @@ import type {
 } from 'jscodeshift';
 import { Config } from './types';
 import { replaceFireEventWithUserEvent } from './event-utils';
-import { hasViewDeclarationFromRenderMethods, getUserFromSetup } from './setup-utils';
+import { getUserFromSetup } from './setup-utils';
 import { identifyAndUpdateHelperFunctionCalls } from './helper-function-utils';
-import { prefixUserEventWithView } from './view-utils';
+import { hasViewDeclarationFromRenderMethods, prefixUserEventWithView } from '../shared';
 
 // Test Callback Handling
-export const addAsyncToCallback = (
-  callback: FunctionExpression | ArrowFunctionExpression,
-  config: Config,
-) => {
+export const addAsyncToCallbackPath = (callbackPath: ASTPath<CallExpression>, config: Config) => {
+  const callback = callbackPath.value.arguments[1];
+  if (!callback) return;
+  if (callback.type !== 'FunctionExpression' && callback.type !== 'ArrowFunctionExpression') return;
+
   if (!callback.async) {
     callback.async = true;
     console.log(`[DEBUG] Made callback async in file: ${config.filePath}`);
   }
 };
 
-export const handleTestCallback = (callbackPath: ASTPath<CallExpression>, config: Config) => {
-  if (!callbackPath?.value?.arguments?.[1]) return;
-
+const getBodyFromCallbackPath = (callbackPath: ASTPath<CallExpression>) => {
   const callback = callbackPath.value.arguments[1];
   if (callback.type !== 'FunctionExpression' && callback.type !== 'ArrowFunctionExpression') return;
 
   const body = callback.body.type === 'BlockStatement' ? callback.body.body : [];
-  if (!Array.isArray(body)) return;
+  if (!Array.isArray(body)) return null;
+  return body;
+};
+
+export const handleTestCallback = (callbackPath: ASTPath<CallExpression>, config: Config) => {
+  const body = getBodyFromCallbackPath(callbackPath);
+  if (!body) return;
 
   const hasFireEventReplacement = replaceFireEventWithUserEvent(body, config);
   prefixUserEventWithView(body, config);
@@ -44,5 +49,5 @@ export const handleTestCallback = (callbackPath: ASTPath<CallExpression>, config
     getUserFromSetup(body, config);
   }
 
-  addAsyncToCallback(callback, config);
+  addAsyncToCallbackPath(callbackPath, config);
 };

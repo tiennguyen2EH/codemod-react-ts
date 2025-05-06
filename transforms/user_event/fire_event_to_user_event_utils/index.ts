@@ -7,5 +7,4 @@ export * from './import-utils';
 export * from './event-utils';
 export * from './setup-utils';
 export * from './test-callback-utils';
-export * from './view-utils';
 export * from './helper-function-utils';
