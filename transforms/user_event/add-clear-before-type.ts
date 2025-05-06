@@ -14,6 +14,8 @@
 
 import type { API, FileInfo } from 'jscodeshift';
 
+import { Config } from './shared';
+
 const getLinesToProcess = (lines: string | number | undefined) => {
   if (!lines) return [];
   if (typeof lines === 'number') return [lines];
@@ -25,15 +27,10 @@ const getLinesToProcess = (lines: string | number | undefined) => {
 export default function transformer(file: FileInfo, api: API, options: { lines?: string }) {
   const j = api.jscodeshift;
   const root = j(file.source);
+  const config: Config = { j, root, filePath: file.path };
 
   try {
-    console.log(
-      `[DEBUG] Transforming file: ${file.path}`,
-      'HEHE',
-      options.lines,
-      'HAHA',
-      typeof options.lines,
-    );
+    console.log(`[DEBUG] Transforming file: ${file.path}`);
 
     // Parse line numbers from options
     const linesToProcess = getLinesToProcess(options.lines);
