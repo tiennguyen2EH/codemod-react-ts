@@ -12,15 +12,30 @@
  * - Handles error conditions gracefully
  */
 
-import type { API, FileInfo } from 'jscodeshift';
+import type { API, ASTPath, CallExpression, FileInfo } from 'jscodeshift';
 
-import { Config } from './shared';
+import {
+  Config,
+  findAllItEachTestBlocks,
+  findAllSkippedTestBlocks,
+  findAllTestBlocks,
+  prefixUserEventWithView,
+} from './shared';
 
 const getLinesToProcess = (lines: string | number | undefined) => {
   if (!lines) return [];
   if (typeof lines === 'number') return [lines];
   const lineNumbers = lines.split(',').map((line) => parseInt(line, 10));
   return lineNumbers.filter((line) => !isNaN(line));
+};
+
+const getBodyFromCallbackPath = (callbackPath: ASTPath<CallExpression>) => {
+  const callback = callbackPath.value.arguments[1];
+  if (callback.type !== 'FunctionExpression' && callback.type !== 'ArrowFunctionExpression') return;
+
+  const body = callback.body.type === 'BlockStatement' ? callback.body.body : [];
+  if (!Array.isArray(body)) return null;
+  return body;
 };
 
 // Main Transformer
@@ -102,6 +117,26 @@ export default function transformer(file: FileInfo, api: API, options: { lines?:
 
         console.log(`[DEBUG] Added user.clear call before advancedType at line ${callStartLine}`);
       }
+    });
+
+    // Process all test blocks and apply user event prefix
+    findAllTestBlocks(config).forEach((path) => {
+      const body = getBodyFromCallbackPath(path);
+      if (!body) return;
+      prefixUserEventWithView(body, config);
+    });
+
+    // Process 'it.skip' and 'test.skip' tests
+    findAllSkippedTestBlocks(config).forEach((path) => {
+      const body = getBodyFromCallbackPath(path);
+      if (!body) return;
+      prefixUserEventWithView(body, config);
+    });
+
+    findAllItEachTestBlocks(config).forEach((path) => {
+      const body = getBodyFromCallbackPath(path);
+      if (!body) return;
+      prefixUserEventWithView(body, config);
     });
 
     return root.toSource({ quote: 'single' });

@@ -112,50 +112,6 @@ export const getUserFromSetup = (blockBody: BlockStatement['body'], config: Conf
   );
 };
 
-/**
- * Checks if a 'view' variable is declared with a supported render method
- * e.g., const view = renderWithRedux() or const view = render()
- *
- * @param {BlockStatement['body']} blockBody - The body of a block statement to search for view variable declaration
- * @param {Config} config - The codemod configuration object
- * @returns {boolean} - True if a 'view' variable declaration using a supported render method exists
- */
-export const hasViewDeclarationFromRenderMethods = (
-  blockBody: BlockStatement['body'],
-  config: Config,
-): boolean => {
-  let foundViewDeclaration = false;
-
-  config
-    .j(blockBody)
-    .find(config.j.VariableDeclarator)
-    .forEach((varDeclPath) => {
-      // Look for const view = ...
-      if (
-        varDeclPath.value.type === 'VariableDeclarator' &&
-        varDeclPath.value.id.type === 'Identifier' &&
-        varDeclPath.value.id.name === 'view'
-      ) {
-        // Check if initialization is a call to a supported render method
-        if (
-          varDeclPath.value.init &&
-          varDeclPath.value.init.type === 'CallExpression' &&
-          varDeclPath.value.init.callee.type === 'Identifier'
-        ) {
-          const calleeName = varDeclPath.value.init.callee.name;
-          if (POSSIBLE_SUPPORTED_RENDER_METHODS.includes(calleeName as any)) {
-            console.log(
-              `[DEBUG] Found view declaration using ${calleeName} in file: ${config.filePath}`,
-            );
-            foundViewDeclaration = true;
-          }
-        }
-      }
-    });
-
-  return foundViewDeclaration;
-};
-
 export const hasUserDestructured = (blockBody: BlockStatement['body'], config: Config): boolean => {
   return config
     .j(blockBody)

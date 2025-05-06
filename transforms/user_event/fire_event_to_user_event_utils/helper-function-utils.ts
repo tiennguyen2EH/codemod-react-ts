@@ -2,7 +2,7 @@ import type { BlockStatement, FunctionExpression, ArrowFunctionExpression } from
 import { Config } from './types';
 import { POSSIBLE_SUPPORTED_RENDER_METHODS } from './constants';
 import { createUserTypeAnnotation, replaceFireEventWithUserEvent } from './event-utils';
-import { prefixUserEventWithView } from './view-utils';
+import { prefixUserEventWithView } from '../shared';
 
 // Helper Function Processing
 export const isSetupFunction = (name: string): boolean => {

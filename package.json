@@ -16,6 +16,7 @@
   "dependencies": {
     "jscodeshift": "^17.1.1",
     "rimraf": "^6.0.1",
+    "ts-morph": "^25.0.1",
     "yargs": "^17.7.2"
   },
   "bin": {

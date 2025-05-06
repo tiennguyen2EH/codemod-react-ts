@@ -39,19 +39,24 @@
  * - Provides debug logging for transformation steps
  */
 
-import type { API, FileInfo, Identifier } from 'jscodeshift';
+import type { API, FileInfo } from 'jscodeshift';
 
 // Import all utils from the utils directory
 import {
   Config,
   addUserEventImport,
-  removeFireEventImport,
-  handleTestCallback,
-  replaceFireEventWithUserEvent,
-  prefixUserEventWithView,
   handleHelperFunctions,
+  handleTestCallback,
   isSetupFunction,
+  removeFireEventImport,
+  replaceFireEventWithUserEvent,
 } from './fire_event_to_user_event_utils';
+import {
+  findAllItEachTestBlocks,
+  findAllSkippedTestBlocks,
+  findAllTestBlocks,
+  prefixUserEventWithView,
+} from './shared';
 
 // Main Transformer
 export default function transformer(file: FileInfo, api: API) {
@@ -69,52 +74,18 @@ export default function transformer(file: FileInfo, api: API) {
     addUserEventImport(hasHelperFunctionsWithFireEvent, config);
 
     // Process all test blocks and apply user event prefix
-    root
-      .find(j.CallExpression)
-      .filter(
-        (path) =>
-          path.value.callee.type === 'Identifier' &&
-          (path.value.callee.name === 'it' || path.value.callee.name === 'test'),
-      )
-      .forEach((path) => {
-        handleTestCallback(path, config);
-      });
+    findAllTestBlocks(config).forEach((path) => {
+      handleTestCallback(path, config);
+    });
 
     // Process 'it.skip' and 'test.skip' tests
-    root
-      .find(j.CallExpression)
-      .filter((path) => {
-        const callee = path.value.callee;
-        return (
-          callee?.type === 'MemberExpression' && (callee?.property as Identifier).name === 'skip'
-        );
-      })
-      .forEach((path) => {
-        handleTestCallback(path, config);
-      });
+    findAllSkippedTestBlocks(config).forEach((path) => {
+      handleTestCallback(path, config);
+    });
 
-    // Process 'it.each' tests
-    root
-      .find(j.CallExpression)
-      .filter((path) => {
-        const callee = path.value.callee;
-        if (callee.type === 'CallExpression') {
-          return (
-            callee.callee?.type === 'MemberExpression' &&
-            (callee.callee?.property as Identifier).name === 'each'
-          );
-        }
-        if (callee.type === 'TaggedTemplateExpression') {
-          return (
-            callee.tag?.type === 'MemberExpression' &&
-            (callee.tag?.property as Identifier).name === 'each'
-          );
-        }
-        return false;
-      })
-      .forEach((path) => {
-        handleTestCallback(path, config);
-      });
+    findAllItEachTestBlocks(config).forEach((path) => {
+      handleTestCallback(path, config);
+    });
 
     // Process setup functions that has fireEvent calls inside
     root
