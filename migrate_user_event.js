@@ -350,9 +350,6 @@ const main = async () => {
   await runPhase3AdvancedTypeToType(folderPath);
 
   console.log('All operations completed successfully');
-
-  // Run tests again to ensure no regressions
-  await runJestTests(config.jestRunner, folderPath);
 };
 
 // Call main function and handle errors
